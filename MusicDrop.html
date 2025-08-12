@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MP3 Drop & Loop Player</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f1724;color:#e6eef8;margin:0;padding:20px}
+    .card{width:min(720px,96vw);background:linear-gradient(180deg,#0b1220 0%, #081022 100%);border:1px solid rgba(255,255,255,0.04);padding:20px;border-radius:12px;box-shadow:0 6px 24px rgba(2,6,23,0.6)}
+    h1{margin:0 0 12px;font-size:20px}
+    .drop{border:2px dashed rgba(255,255,255,0.06);padding:28px;border-radius:10px;text-align:center;transition:background .15s, border-color .15s}
+    .drop.drag{background:rgba(100,200,255,0.04);border-color:rgba(100,200,255,0.32)}
+    .small{font-size:13px;color:#9fb6d8}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap}
+    .controls > *{background:#071223;border:1px solid rgba(255,255,255,0.03);padding:8px 10px;border-radius:8px}
+    input[type="number"]{width:120px}
+    button{cursor:pointer}
+    .status{margin-top:12px;font-size:14px}
+    .hidden{display:none}
+    .fileinfo{margin-top:8px;font-size:13px;color:#bcd7ff}
+    footer{margin-top:14px;font-size:12px;color:#81a9da}
+  </style>
+</head>
+<body>
+  <main class="card" role="main">
+    <h1>Drag & Drop MP3 — Play & Loop</h1>
+
+    <div id="drop" class="drop" tabindex="0" aria-label="Drop MP3 file here">
+      <p><strong>Drop an MP3 here</strong> or <label style="text-decoration:underline; cursor:pointer"><input id="fileInput" type="file" accept="audio/*" class="hidden">choose file</label></p>
+      <p class="small">Supported: MP3 (or other browser-audio formats). File is played locally — not uploaded anywhere.</p>
+    </div>
+
+    <div class="fileinfo" id="fileInfo">No file loaded.</div>
+
+    <div class="controls" aria-hidden="false">
+      <button id="playBtn" disabled>Play</button>
+      <button id="pauseBtn" disabled>Pause</button>
+      <button id="stopBtn" disabled>Stop</button>
+
+      <label title="How many times to repeat">
+        Loops (count):
+        <input id="loopCount" type="number" min="1" step="1" value="3">
+      </label>
+
+      <label>
+        <input id="infinite" type="checkbox"> Loop infinitely
+      </label>
+
+      <label>
+        <input id="autoplay" type="checkbox" checked> Autoplay on load
+      </label>
+    </div>
+
+    <div class="status" id="status">Plays: 0 • Remaining: —</div>
+
+    <!-- remember future me: Hidden audio element used for playback -->
+    <audio id="audio" preload="auto"></audio>
+
+    <footer>Tip: set a very large loop number if you want "many times". For truly infinite, check "Loop infinitely".</footer>
+  </main>
+
+  <script>
+    (function () {
+      const drop = document.getElementById('drop');
+      const fileInput = document.getElementById('fileInput');
+      const audio = document.getElementById('audio');
+      const playBtn = document.getElementById('playBtn');
+      const pauseBtn = document.getElementById('pauseBtn');
+      const stopBtn = document.getElementById('stopBtn');
+      const loopCountInput = document.getElementById('loopCount');
+      const infiniteCheck = document.getElementById('infinite');
+      const autoplayCheck = document.getElementById('autoplay');
+      const fileInfo = document.getElementById('fileInfo');
+      const status = document.getElementById('status');
+
+      let objectUrl = null;
+      let targetLoops = 0;     // number of times to play
+      let playsSoFar = 0;
+      let looping = false;
+
+      function setStatus() {
+        const rem = (targetLoops === Infinity) ? '∞' : (Math.max(0, targetLoops - playsSoFar));
+        status.textContent = `Plays: ${playsSoFar} • Remaining: ${rem}`;
+      }
+
+      function enableControls(enabled) {
+        playBtn.disabled = !enabled;
+        pauseBtn.disabled = !enabled;
+        stopBtn.disabled = !enabled;
+      }
+
+      function resetState() {
+        playsSoFar = 0;
+        targetLoops = 0;
+        looping = false;
+        setStatus();
+        enableControls(false);
+      }
+
+      // Clean up previous objectURL if any
+      function revokeURL() {
+        if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+          objectUrl = null;
+        }
+      }
+
+      function loadFile(file) {
+        if (!file || !file.type.startsWith('audio/')) {
+          alert('Please drop a valid audio file (MP3 or another audio format supported by your browser).');
+          return;
+        }
+        revokeURL();
+        objectUrl = URL.createObjectURL(file);
+        audio.src = objectUrl;
+        fileInfo.textContent = `${file.name} — ${(file.size/1024/1024).toFixed(2)} MB`;
+        playsSoFar = 0;
+        // determine loops
+        targetLoops = infiniteCheck.checked ? Infinity : Math.max(1, parseInt(loopCountInput.value, 10) || 1);
+        setStatus();
+        enableControls(true);
+        if (autoplayCheck.checked) startPlaying();
+      }
+
+      // Play handling with loop counting
+      function startPlaying() {
+        if (!audio.src) return;
+        looping = true;
+        // If audio was midway, resume; else start from beginning
+        if (audio.currentTime === 0 || audio.ended) {
+          // nothing
+        }
+        audio.play().catch(err => {
+          console.warn('Playback failed:', err);
+        });
+      }
+
+      function stopPlaying() {
+        looping = false;
+        audio.pause();
+        audio.currentTime = 0;
+      }
+
+      // Update targetLoops whenever input/checkbox changes
+      loopCountInput.addEventListener('input', () => {
+        if (!infiniteCheck.checked) {
+          targetLoops = Math.max(1, parseInt(loopCountInput.value, 10) || 1);
+          setStatus();
+        }
+      });
+      infiniteCheck.addEventListener('change', () => {
+        targetLoops = infiniteCheck.checked ? Infinity : Math.max(1, parseInt(loopCountInput.value, 10) || 1);
+        setStatus();
+      });
+
+      playBtn.addEventListener('click', startPlaying);
+      pauseBtn.addEventListener('click', () => audio.pause());
+      stopBtn.addEventListener('click', () => {
+        stopPlaying();
+        playsSoFar = 0;
+        setStatus();
+      });
+
+      // When the audio ends, increment play count and decide whether to replay.
+      audio.addEventListener('ended', () => {
+        playsSoFar += 1;
+        setStatus();
+
+        if (targetLoops === Infinity || playsSoFar < targetLoops) {
+          // small timeout to avoid race conditions on some browsers
+          setTimeout(() => {
+            // reset to start and play again
+            try {
+              audio.currentTime = 0;
+            } catch (e) {
+              // ignore
+            }
+            if (looping) audio.play().catch(err => console.warn('Replay failed', err));
+          }, 50);
+        } else {
+          // finished all loops
+          looping = false;
+        }
+      });
+
+      // Drag & Drop events
+      ['dragenter','dragover'].forEach(evt => {
+        drop.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.add('drag');
+        });
+      });
+
+      ['dragleave','dragend','drop'].forEach(evt => {
+        drop.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.remove('drag');
+        });
+      });
+
+      drop.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files && files.length) {
+          const f = files[0];
+          loadFile(f);
+        }
+      });
+
+      // Fallback file input
+      fileInput.addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) loadFile(f);
+      });
+
+      // keyboard accessibility: press Enter to open file picker
+      drop.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') fileInput.click();
+      });
+
+      // page unload cleanup
+      window.addEventListener('beforeunload', () => revokeURL());
+
+      // Init
+      resetState();
+
+      // Small UX: enable/disable pause depending on audio events
+      audio.addEventListener('play', () => { playBtn.disabled = false; pauseBtn.disabled = false; });
+      audio.addEventListener('pause', () => { /* keep controls enabled */ });
+      audio.addEventListener('error', (ev) => {
+        console.error('Audio error', ev);
+        alert('Unable to play this file — the format may not be supported by your browser.');
+        resetState();
+      });
+    })();
+  </script>
+</body>
+</html>
